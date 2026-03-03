@@ -1,0 +1,108 @@
+name: Ezra QA — Playwright Test Suite
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Nightly full regression at 2am UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Which suite to run'
+        required: false
+        default: 'all'
+        type: choice
+        options: [all, ui, api, smoke]
+
+env:
+  EZRA_BASE_URL: ${{ secrets.EZRA_STAGING_URL }}
+  MEMBER_A_EMAIL: ${{ secrets.MEMBER_A_EMAIL }}
+  MEMBER_A_PASSWORD: ${{ secrets.MEMBER_A_PASSWORD }}
+  MEMBER_A_ID: ${{ secrets.MEMBER_A_ID }}
+  MEMBER_A_TOKEN: ${{ secrets.MEMBER_A_TOKEN }}
+  MEMBER_B_EMAIL: ${{ secrets.MEMBER_B_EMAIL }}
+  MEMBER_B_PASSWORD: ${{ secrets.MEMBER_B_PASSWORD }}
+  MEMBER_B_ID: ${{ secrets.MEMBER_B_ID }}
+  MEMBER_B_TOKEN: ${{ secrets.MEMBER_B_TOKEN }}
+  MEMBER_B_BOOKING_ID: ${{ secrets.MEMBER_B_BOOKING_ID }}
+  MEMBER_B_ENCOUNTER_ID: ${{ secrets.MEMBER_B_ENCOUNTER_ID }}
+
+jobs:
+  # ── PR Smoke Gate ──────────────────────────────────────────────────────────
+  # Runs on every PR — fast, critical tests only
+  # Blocks merge if any test fails
+  smoke:
+    name: Smoke Gate (PR)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run API security tests (fast gate)
+        run: npx playwright test --project=api --reporter=github
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: playwright-report/
+          retention-days: 7
+
+  # ── Full Regression ────────────────────────────────────────────────────────
+  # Runs nightly and on push to main — full suite including UI tests
+  full-regression:
+    name: Full Regression
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers (all)
+        run: npx playwright install --with-deps
+
+      - name: Run full test suite
+        run: npx playwright test --reporter=github,html
+
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_number }}
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "❌ Ezra QA Nightly regression FAILED on `${{ github.ref_name }}`\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_QA_WEBHOOK }}
