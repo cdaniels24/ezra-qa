@@ -1,6 +1,6 @@
 # Ezra Health — QA Automation Suite
 
-**Candidate:** Bern Jones | **Assessment:** Senior QA Engineer | **March 2026**
+**Candidate:** Clarence Daniels | **Assessment:** Senior QA Engineer | **March 2026**
 
 ---
 
